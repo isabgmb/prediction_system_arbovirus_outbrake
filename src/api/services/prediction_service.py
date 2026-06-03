@@ -1,0 +1,128 @@
+"""
+api/services/prediction_service.py
+Orchestrates: validate → aggregate → LSTM → cache → return.
+"""
+from __future__ import annotations
+from datetime import datetime
+from isoweek import Week
+
+from src.api.models.db_models import ModelPrediction
+from src.api.models.schemas import PredictionOut, PredictionPointOut
+from src.api.repositories.neighborhood_repository import NeighborhoodRepository, PredictionRepository
+from src.api.repositories.dengue_repository import DengueRepository
+from src.api.repositories.ovitrap_repository import OvitrapRepository
+from src.api.services.validation_service import ValidationService
+from src.api.services.aggregation_service import AggregationService
+from src.ml.inference import run_prediction
+
+MODEL_VERSION = "sipsa-lstm-v1"
+
+
+def _risk_level(mean_cases: float) -> str:
+    if mean_cases > 20: return "high"
+    if mean_cases > 10: return "moderate"
+    return "low"
+
+
+def _next_week(iso_year: int, iso_week: int):
+    w = Week(iso_year, iso_week) + 1
+    return w.year, w.week, w.monday()
+
+
+class PredictionService:
+    def __init__(
+        self,
+        validation_svc:    ValidationService,
+        aggregation_svc:   AggregationService,
+        neighborhood_repo: NeighborhoodRepository,
+        prediction_repo:   PredictionRepository,
+    ):
+        self.validation_svc    = validation_svc
+        self.aggregation_svc   = aggregation_svc
+        self.neighborhood_repo = neighborhood_repo
+        self.prediction_repo   = prediction_repo
+
+    async def predict(
+        self,
+        neighborhood_id: int,
+        input_type:      str = "dengue",
+        lag:             int = 1,
+        n_weeks:         int = 4,
+    ) -> PredictionOut:
+
+        # 1. Validate
+        await self.validation_svc.assert_exists(neighborhood_id)
+        await self.validation_svc.assert_has_geolocation(neighborhood_id)
+        await self.validation_svc.assert_sufficient_history(neighborhood_id)
+
+        neighborhood = await self.neighborhood_repo.get_by_id(neighborhood_id)
+
+        # 2. Return cache if available
+        cached = await self.prediction_repo.get_cached(neighborhood_id, MODEL_VERSION, input_type, lag)
+        if cached:
+            return self._format(cached, neighborhood.name, input_type, lag)
+
+        # 3. Build input series
+        series = await self.aggregation_svc.get_aligned_series()
+
+        # 4. Run LSTM
+        result = run_prediction(
+            dengue_series  = series["dengue"],
+            edi_series     = series["edi"],
+            input_type     = input_type,
+            lag            = lag,
+            n_future_weeks = n_weeks,
+            n_reps         = 5,
+        )
+
+        # 5. Build future week rows
+        last_year = series["iso_years"][-1]
+        last_week = series["iso_weeks"][-1]
+        rows: list[ModelPrediction] = []
+
+        for i in range(n_weeks):
+            y = last_year if i == 0 else rows[-1].iso_year
+            w = last_week if i == 0 else rows[-1].iso_week
+            ny, nw, nd = _next_week(y, w)
+            rows.append(ModelPrediction(
+                neighborhood_id = neighborhood_id,
+                week_start      = nd,
+                iso_year        = ny,
+                iso_week        = nw,
+                predicted_cases = float(result["mean"][i]),
+                lower_bound     = float(result["lower"][i]),
+                upper_bound     = float(result["upper"][i]),
+                model_version   = MODEL_VERSION,
+                input_type      = input_type,
+                lag             = lag,
+                generated_at    = datetime.utcnow(),
+            ))
+
+        # 6. Persist cache
+        await self.prediction_repo.save(rows)
+
+        return self._format(rows, neighborhood.name, input_type, lag)
+
+    @staticmethod
+    def _format(rows, name, input_type, lag) -> PredictionOut:
+        mean = sum(float(r.predicted_cases) for r in rows) / len(rows)
+        return PredictionOut(
+            neighborhood_id   = rows[0].neighborhood_id,
+            neighborhood_name = name,
+            input_type        = input_type,
+            lag               = lag,
+            model_version     = MODEL_VERSION,
+            generated_at      = rows[0].generated_at or datetime.utcnow(),
+            risk_level        = _risk_level(mean),
+            series=[
+                PredictionPointOut(
+                    week_start      = r.week_start,
+                    iso_year        = r.iso_year,
+                    iso_week        = r.iso_week,
+                    predicted_cases = float(r.predicted_cases),
+                    lower_bound     = float(r.lower_bound) if r.lower_bound else None,
+                    upper_bound     = float(r.upper_bound) if r.upper_bound else None,
+                )
+                for r in rows
+            ],
+        )
