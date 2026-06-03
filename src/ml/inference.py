@@ -13,7 +13,7 @@ instead of reading from files, it accepts numpy arrays directly from
 the aggregation service.
 """
 
-from __future__ import annotations
+from _future_ import annotations
 
 import numpy as np
 from pathlib import Path
@@ -47,7 +47,7 @@ class _ModelRegistry:
     Holds the pre-trained weights in memory.
     Loaded once at startup via load_weights(); never retrained here.
     """
-    def __init__(self):
+    def _init_(self):
         self._weights: dict[int, list] = {}   # model_index → list of weight arrays
         self._input_sizes: dict[int, int] = {}
         self._loaded: bool = False
@@ -71,13 +71,26 @@ class _ModelRegistry:
         stored predictions directly for the test window. For live API use,
         the prediction service will re-train a single rep on the full available
         data and use that model for the requested future window.
+
+        If the .npz file does not exist yet (e.g. training has not been run),
+        this method logs a warning and returns without raising — the API can
+        still start. Calls to run_prediction() will raise a 503-compatible
+        error until weights are loaded.
         """
         path = Path(npz_path)
         if not path.exists():
-            raise FileNotFoundError(
-                f"Model weights not found at {path}.\n"
-                "Run  python -m src.ml.train  first to generate them."
+            # Do NOT raise here — allow the API to start without weights.
+            # run_prediction() will surface a clear 503 error when called.
+            import warnings
+            warnings.warn(
+                f"Model weights not found at {path}. "
+                "The API will start, but /predicao will return 503 until "
+                "weights are available. Run  python -m src.ml.train  to generate them.",
+                RuntimeWarning,
+                stacklevel=2,
             )
+            return
+
         self._loaded = True
         self.model_version = path.stem   # e.g. "eval_results"
 
@@ -136,6 +149,13 @@ def _transfer_weights(src, dst) -> None:
 # Public entry point — called by prediction_service.py
 # =============================================================================
 
+class ModelNotReadyError(RuntimeError):
+    """
+    Raised by run_prediction() when the model weights have not been loaded.
+    prediction_service.py should catch this and return HTTP 503.
+    """
+
+
 def run_prediction(
     dengue_series: np.ndarray,
     edi_series: np.ndarray,
@@ -173,7 +193,20 @@ def run_prediction(
         'upper'  : (n_future_weeks,)  mean + 1 std
         'input_type': str
         'lag'    : int
+
+    Raises
+    ------
+    ModelNotReadyError
+        If model weights have not been loaded yet (e.g. training not run).
+        The caller (prediction_service.py) should map this to HTTP 503.
     """
+    # ── 503 guard — fail fast with a clear message before touching TF ────────
+    if not _registry.is_loaded:
+        raise ModelNotReadyError(
+            "Model weights are not loaded. "
+            "Run  python -m src.ml.train  to generate them, then restart the API."
+        )
+
     tf = _get_tf()
 
     # ── 1. Select and log2-transform the input series ─────────────────────────

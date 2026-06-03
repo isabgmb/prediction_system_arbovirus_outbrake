@@ -134,3 +134,56 @@ class DashboardOut(BaseModel):
 class TokenOut(BaseModel):
     access_token: str
     token_type:   str = "bearer"
+
+
+# =============================================================================
+# Pre-computed results  — GET /resultados
+# Served directly from the .mat file, no training required
+# =============================================================================
+
+class ModelMetricsOut(BaseModel):
+    """Performance metrics for one model configuration."""
+    model_index:  int
+    input_type:   str        # "dengue" | "edi"
+    lag_label:    str        # "1 past sample" | "3:1 past samples" etc.
+    mean_rmse:    float
+    std_err_rmse: float
+    mean_r:       float
+    std_err_r:    float
+    risk_level:   str        # "high" | "moderate" | "low" based on RMSE
+
+
+class TimeSeriesPointOut(BaseModel):
+    """One data point in a predicted vs actual series."""
+    week_start:      str     # ISO date string "2019-03-18"
+    actual:          float
+    predicted_mean:  float
+    lower_bound:     float
+    upper_bound:     float
+
+
+class BestModelSeriesOut(BaseModel):
+    """Full time series for one of the two best models."""
+    model_index:  int
+    input_type:   str
+    lag_label:    str
+    mean_r:       float
+    mean_rmse:    float
+    series:       list[TimeSeriesPointOut]
+
+
+class ResultadosOut(BaseModel):
+    """
+    Full response for GET /resultados.
+    Contains everything the frontend needs to populate:
+        - model performance bar charts (metrics)
+        - predicted vs actual line charts (best_models)
+        - model accuracy gauge (best_r, best_rmse)
+    """
+    metrics:      list[ModelMetricsOut]     # all 10 models
+    best_models:  list[BestModelSeriesOut]  # D→D best + O→D best
+    best_r:       float                     # highest r across all models
+    best_rmse:    float                     # lowest RMSE across all models
+    test_period_start: str
+    test_period_end:   str
+    n_reps:       int                       # 30 — number of training repetitions
