@@ -16,10 +16,11 @@ pydantic-settings>=2.2
 
 # Database
 sqlalchemy>=2.0
-asyncpg>=0.29
+aiosqlite>=0.20          # SQLite async driver — use for local testing
+asyncpg>=0.29            # PostgreSQL async driver — use for production
 alembic>=1.13
 
-# Auth (RN07)
+# Auth
 python-jose[cryptography]>=3.3
 passlib[bcrypt]>=1.7
 python-multipart>=0.0.9
