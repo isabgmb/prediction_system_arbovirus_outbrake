@@ -1,348 +1,83 @@
-# SIPSA — Dengue Forecasting Backend
+# SIPSA — Backend de previsão de dengue
 
-Python backend for the SIPSA (Sistema Inteligente de Previsão de Surtos de Arboviroses) project.
+Backend do **SIPSA** (Sistema Inteligente de Previsão de Surtos de Arboviroses) para Natal, RN.
 
-Implements a 1D-LSTM model for dengue outbreak forecasting, served via a FastAPI REST API. Originally ported from a MATLAB research pipeline described in:
+Prevê casos semanais de dengue com uma rede LSTM 1D, reproduzida em Python a partir do código
+MATLAB do artigo:
 
-> *Data-Driven Computational Intelligence Applied to Dengue Outbreak Forecasting: a case study at the scale of the city of Natal, RN-Brazil*
+> *Data-Driven Computational Intelligence Applied to Dengue Outbreak Forecasting: a case study
+> at the scale of the city of Natal, RN-Brazil*
+> ([repositório do artigo](https://github.com/isabgmb/dengueknowledgePaper_pi))
 
----
+O que o sistema oferece, por uma API REST (FastAPI):
 
-## Folder structure
+- **Histórico** de casos e de ovitrampas (OPI e EDI) por cidade, distrito sanitário e bairro.
+- **Previsões** de 1 a 4 semanas à frente, a partir de modelos já treinados, com nível de
+  risco relativo ao histórico de cada área.
+- **Replay**: qualquer semana passada pode ser consultada como o sistema a veria naquele
+  momento, com a previsão ao lado do que de fato aconteceu.
+- **Ingestão** de novas semanas de dados a partir de CSV.
 
-```
-dengue-forecasting/
-├── data/
-│   ├── raw/               ← source files (never committed)
-│   ├── models/            ← generated model output (.npz)
-│   └── processed/         ← reserved for future use
-├── notebooks/
-│   └── 02_model_eval.ipynb
-├── outputs/               ← saved evaluation figures
-├── src/
-│   ├── main.py            ← FastAPI entry point
-│   ├── core/
-│   │   ├── config.py      ← settings loaded from .env
-│   │   └── database.py    ← SQLAlchemy async engine (SQLite + PostgreSQL)
-│   ├── api/
-│   │   ├── controllers/   ← route definitions
-│   │   │   ├── auth.py
-│   │   │   ├── casos.py
-│   │   │   ├── ovitrampas.py
-│   │   │   ├── predicao.py
-│   │   │   └── resultados.py
-│   │   ├── services/      ← business logic
-│   │   │   ├── aggregation_service.py
-│   │   │   ├── prediction_service.py
-│   │   │   ├── resultados_service.py
-│   │   │   └── validation_service.py
-│   │   ├── repositories/  ← database queries
-│   │   │   ├── neighborhood_repository.py
-│   │   │   ├── dengue_repository.py
-│   │   │   └── ovitrap_repository.py
-│   │   └── models/
-│   │       ├── db_models.py   ← ORM table definitions
-│   │       └── schemas.py     ← Pydantic response schemas
-│   ├── ml/
-│   │   ├── train.py       ← offline LSTM training
-│   │   ├── evaluate.py    ← model evaluation + figures
-│   │   ├── inference.py   ← stateful LSTM inference for the API
-│   │   └── utils.py       ← shared metrics and data loaders
-│   ├── core/
-│   │   └── epiweek.py     ← Brazilian epidemiological weeks
-│   └── etl/
-│       └── migrate.py     ← loads raw files into the database
-├── migrations/            ← Alembic migrations (schema history)
-├── alembic.ini
-├── .env.example
-├── .gitignore
-├── requirements.txt
-└── README.md
-```
+Os dados de pesquisa cobrem 2016 a 2019 (semanas epidemiológicas). Ainda não há fonte de dados
+ao vivo.
 
----
+## Início rápido
 
-## Setup
+Requer Python 3.10+ e os arquivos de dados do artigo em `data/raw/`
+(lista em [docs/SETUP.md](docs/SETUP.md#arquivos-de-dados)).
 
 ```bash
-# 1. Create and activate a virtual environment
 python -m venv .venv
-source .venv/bin/activate      # Windows: .venv\Scripts\activate
-
-# 2. Install dependencies
+.venv\Scripts\Activate.ps1          # Linux/macOS: source .venv/bin/activate
 pip install -r requirements.txt
 
-# 3. Create your .env file and set SECRET_KEY (required, >= 32 characters)
-cp .env.example .env
-python -c "import secrets; print(secrets.token_urlsafe(48))"   # paste into SECRET_KEY=
-```
+cp .env.example .env                # e preencha SECRET_KEY (veja docs/SETUP.md)
 
----
-
-## Required data files
-
-Place the following in `data/raw/` before running anything.
-These files are gitignored and must be copied manually.
-
-| File | Used by |
-|---|---|
-| `Dados_Modelagem.xlsx` | ETL + training |
-| `DADOS GERAIS_01.xlsx` | ETL |
-| `Rearranged_Data.mat` | ETL + training |
-| `Models_1DLSTM_2022_02_04_EvalResults.mat` | `/resultados` endpoint only |
-
-They come from the paper's repository (license CC BY-NC-SA 4.0); see
-[`docs/DATA_SOURCES.md`](docs/DATA_SOURCES.md) for sources, licenses and citations.
-
-The ETL also reads `data/reference/neighborhoods.csv` (committed), which maps each
-neighborhood across sources: its row in the ovitrap data, municipal code, health district and
-coordinates. See [`data/reference/README.md`](data/reference/README.md).
-
-New weeks of data are added with `python -m src.ingestion` — see
-[`docs/INGESTION.md`](docs/INGESTION.md).
-
-`python -m src.etl.migrate` can be run again at any time: it updates reference rows in place,
-replaces the weekly data and clears cached predictions, all in one transaction.
-
----
-
-## What to run — by goal
-
-### Just evaluate model coefficients (no database, no API)
-
-Uses the pre-computed MATLAB results. No training required.
-
-```bash
-python -m src.ml.evaluate
-```
-
-Figures are saved to `outputs/`.
-
----
-
-### Run the API locally with SQLite
-
-No Docker or PostgreSQL needed. SQLite is the default in `.env.example`.
-
-```bash
-# 1. Create the schema
-alembic upgrade head
-
-# 2. Populate the database from raw files
-python -m src.etl.migrate
-
-# 3. Create the first account (prompts for a password)
+alembic upgrade head                # cria o banco (SQLite por padrão)
+python -m src.etl.migrate           # carrega os dados do artigo
 python -m src.cli create-user admin --role admin
+python -m src.ml.train --dev        # treina e registra os modelos (~8 min; completo: ~80 min)
 
-# 4. Start the API
-uvicorn src.main:app --reload --port 8000
+uvicorn src.main:app --port 8000
 ```
 
-Interactive docs at `http://localhost:8000/docs`.
+Documentação interativa em http://localhost:8000/docs (use **Authorize** para fazer login).
 
----
+## Principais rotas
 
-### Run the API with PostgreSQL (production)
+Todas exigem token (`Authorization: Bearer ...`), exceto login, `/health` e `/resultados`.
 
-```bash
-# 1. Start PostgreSQL
-docker run --name sipsa-db \
-  -e POSTGRES_USER=sipsa \
-  -e POSTGRES_PASSWORD=sipsa123 \
-  -e POSTGRES_DB=sipsa \
-  -p 5432:5432 -d postgres:15
-
-# 2. Update DATABASE_URL in .env
-# DATABASE_URL=postgresql+asyncpg://sipsa:sipsa123@localhost:5432/sipsa
-
-# 3. Create the schema, run ETL and start API
-alembic upgrade head
-python -m src.etl.migrate
-uvicorn src.main:app --reload --port 8000
-```
-
-### Switching between SQLite and PostgreSQL
-
-One line in `.env` — nothing else in the code changes:
-
-```bash
-# SQLite (local testing — no server needed)
-DATABASE_URL=sqlite+aiosqlite:///./data/sipsa_test.db
-
-# PostgreSQL (production)
-DATABASE_URL=postgresql+asyncpg://sipsa:sipsa123@localhost:5432/sipsa
-```
-
----
-
-### Train the LSTM models
-
-Forecast routes need trained models. Training runs offline and registers the models in the
-database (`model_run`); the API loads them at startup.
-
-```bash
-python -m src.ml.train --dev        # 3 repetitions per configuration, ~8 min on 2 CPU cores
-python -m src.ml.train              # the paper's 30 repetitions, ~80 min on 2 CPU cores (no GPU needed)
-python -m src.ml.evaluate --run data/models/<run_id>   # compare with the paper and naive baselines
-```
-
-Models are saved in `data/models/<run_id>/` (not committed). To use an existing run with
-another or rebuilt database: `python -m src.ml.train --register data/models/<run_id>`.
-How the port compares with the paper: [`docs/REPRODUCTION.md`](docs/REPRODUCTION.md).
-
----
-
-## API endpoints
-
-| Method | Endpoint | Auth | DB | Description |
-|---|---|---|---|---|
-| `POST` | `/auth/token` | No | Yes | Login (form fields `username`, `password`), returns JWT |
-| `GET` | `/auth/me` | Yes | Yes | Logged-in username and role |
-| `GET` | `/resultados` | No | No | Pre-computed model metrics and predictions |
-| `GET` | `/bairros` | Yes | Yes | The 36 neighborhoods: code, health district, coordinates, population |
-| `GET` | `/distritos` | Yes | Yes | The 5 health districts and their neighborhoods |
-| `GET` | `/cidade/casos` | Yes | Yes | Weekly cases for the city: total, mean per neighborhood, incidence per 100,000 |
-| `GET` | `/distritos/{id}/casos` | Yes | Yes | Same for a health district |
-| `GET` | `/bairros/{id}/casos` | Yes | Yes | Same for a neighborhood |
-| `GET` | `/cidade/ovitrampas` | Yes | Yes | Weekly mean OPI and EDI for the city |
-| `GET` | `/distritos/{id}/ovitrampas` | Yes | Yes | Same for a health district |
-| `GET` | `/bairros/{id}/ovitrampas` | Yes | Yes | Same for a neighborhood |
-| `GET` | `/cidade/previsao` | Yes | Yes | City forecast (the LSTM's output), 1–4 weeks ahead depending on the lag |
-| `GET` | `/distritos/{id}/previsao` | Yes | Yes | District forecast (city forecast × the district's share of cases) |
-| `GET` | `/bairros/{id}/previsao` | Yes | Yes | Neighborhood forecast (city forecast × the neighborhood's share of cases) |
-| `GET` | `/dashboard` | Yes | Yes | Main panel: this week's cases, city forecast, neighborhood risk, alerts, map |
-| `GET` | `/health` | No | No | Health check |
-
-Deprecated (still served, will be removed): `/casos/{id}` → `/bairros/{id}/casos`,
-`/ovitrampas/{id}` → `/bairros/{id}/ovitrampas`, `/predicao` → `/cidade/previsao`.
-
-### Authentication
-
-Send the token from `/auth/token` as `Authorization: Bearer <token>`. Tokens expire after
-`ACCESS_TOKEN_EXPIRE_MINUTES` (default 60). Accounts have a role, `admin` or `user`; both
-currently have the same access, and `require_role(...)` in `src/api/controllers/auth.py`
-restricts a route when that changes.
-
-Manage accounts from the command line (passwords are prompted, never stored in files):
-
-```bash
-python -m src.cli create-user NAME [--role admin|user]
-python -m src.cli set-password NAME
-python -m src.cli set-role NAME admin|user
-python -m src.cli deactivate NAME        # existing tokens stop working immediately
-python -m src.cli activate NAME
-python -m src.cli list-users
-```
-
-### Notes per endpoint
-
-**`GET /resultados`** — No parameters, no token, no body. Reads the `.mat` file and returns metrics for all 10 models plus predicted vs actual time series for the two best models. Returns `503` if `Models_1DLSTM_2022_02_04_EvalResults.mat` is not in `data/raw/`.
-
-**Forecasts (`…/previsao`, `/dashboard`)** — Use models saved by `python -m src.ml.train`
-(nothing is trained during a request). Return `503` for a configuration with no trained model.
-The first request for a configuration loads its saved repetitions (a few seconds); forecasts are
-stored and reused until the data is reloaded.
-
-- **City:** the LSTM's own output (`method: "model"`). The paper's model is city-wide.
-- **District / neighborhood:** the city forecast multiplied by the area's share of the city's cases
-  during the model's training weeks (`method: "split"`). It assumes each area keeps its usual share,
-  so treat it as an estimate. The shares add up exactly to the city forecast.
-- **Risk level:** the forecast's peak week compared with the area's own weekly history up to the
-  as-of week: above the 50th percentile is `moderate`, above the 90th `high`, and fewer than 1
-  expected case is always `low` (`RISK_PERCENTILES`, `RISK_MIN_CASES` in `.env`). Each forecast
-  returns the thresholds it used. These are placeholders until the health team sets official ones.
-
-**Replay (`as_of=YYYY-WW`)** — Every area route and `/dashboard` accept an epidemiological
-week and answer as the system would have that week: history stops there, forecasts use only
-data observed up to it, and each forecast point includes `actual_cases` when the outcome is
-known. `in_sample: true` marks forecasts whose target weeks were in the model's training period
-(the model saw those outcomes). Without `as_of`, forecasts use the latest complete week (all
-neighborhoods reported and the model's input exists).
-
-**City values:** `cases` is the total over all neighborhoods; `mean_per_neighborhood` is the
-paper's unit (what the model predicts); `incidence_per_100k` uses 2010 Census population.
-
-### Query parameters
-
-The `…/casos` and `…/ovitrampas` routes accept optional `year_from` and `year_to` (epidemiological years).
-
-All weekly data uses Brazilian **epidemiological weeks** (Sunday–Saturday, as in SINAN):
-each point has `epi_year`, `epi_week` and `week_start` (the Sunday). Week 1 is the first
-week with at least 4 days in January, so it can start in late December.
-
-The `…/previsao` routes accept:
-- `input_type`: `"dengue"` or `"edi"` (default: `"edi"`)
-- `lag`: `1`, `3`, `4`, `5`, or `6` (default: `6`) — any other value returns `422`
-- `n_weeks`: weeks ahead, at most the lag window's newest input (lag 1 or 3: 1 week; 4: 2;
-  5: 3; 6: 4). Default: that maximum. Forecasts only use data observed up to the latest week,
-  so they cannot reach further.
-
-Each forecast point has `predicted_cases` (cases in the area that week), `lower_bound` /
-`upper_bound` (mean ± 1 standard deviation across the model's repetitions — their
-disagreement, not a calibrated interval) and, for the city, `mean_per_neighborhood`.
-`/dashboard` accepts `input_type`, `lag` and `as_of`. All of them accept `as_of`.
-
-### Error responses
-
-| Status | Meaning |
+| Rota | O que retorna |
 |---|---|
-| `401` | Missing or expired token |
-| `404` | Neighborhood or district not found |
-| `422` | Invalid query parameter, horizon beyond what the lag allows, gaps in the data, or an incomplete `as_of` week |
-| `503` | `.mat` file missing, or no trained model for the requested configuration |
+| `POST /auth/token` | Login; devolve o token |
+| `GET /bairros`, `GET /distritos` | Os 36 bairros e os 5 distritos sanitários |
+| `GET /cidade/casos` · `/distritos/{id}/casos` · `/bairros/{id}/casos` | Casos semanais da área |
+| `GET /cidade/ovitrampas` · `/distritos/{id}/ovitrampas` · `/bairros/{id}/ovitrampas` | OPI e EDI semanais da área |
+| `GET /cidade/previsao` · `/distritos/{id}/previsao` · `/bairros/{id}/previsao` | Previsão e nível de risco |
+| `GET /dashboard` | Painel principal: semana atual, previsão, risco por bairro, alertas |
 
----
+Todas as rotas de área e o `/dashboard` aceitam `as_of=AAAA-SS` para o replay.
+Detalhes em [docs/API.md](docs/API.md).
 
-## Database schema
+## Documentação
 
-Managed with Alembic (`migrations/`). Apply with `alembic upgrade head`; after changing
-`src/api/models/db_models.py`, create a migration with
-`alembic revision --autogenerate -m "describe change"` and review it before committing.
-
-| Table | Description |
+| Documento | Conteúdo |
 |---|---|
-| `data_source` | Where each dataset came from: file or URL, license, citation |
-| `district` | Health districts (Norte I, Norte II, Sul, Leste, Oeste) |
-| `neighborhood` | The 36 neighborhoods of Natal, RN: official code, district, coordinates and their source |
-| `socioeconomic` | 2010 Census snapshot per neighborhood: population, total and per-capita income |
-| `epi_week` | Calendar of epidemiological weeks |
-| `dengue_case` | Weekly notified cases (whole numbers), one row per neighborhood per week and disease |
-| `ovitrap_reading` | Weekly OPI + EDI, one row per neighborhood per week |
-| `model_run` | One trained configuration of a training run: training window, metrics, saved model files |
-| `forecast` | Stored forecasts per model run, area (city / district / neighborhood), as-of week and target week |
+| [docs/SETUP.md](docs/SETUP.md) | Instalação completa, arquivos de dados, SQLite e PostgreSQL, contas, problemas comuns |
+| [docs/API.md](docs/API.md) | Todas as rotas, parâmetros, previsões por área, risco, replay e erros |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Estrutura de pastas, fluxo dos dados, banco de dados, correspondência MATLAB → Python |
+| [docs/REPRODUCTION.md](docs/REPRODUCTION.md) | Treino do modelo e comparação com o artigo e com baselines ingênuos |
+| [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) | Origem, licença e citação de cada conjunto de dados |
+| [docs/INGESTION.md](docs/INGESTION.md) | Como adicionar novas semanas de dados |
 
-`dengue_case` and `ovitrap_reading` are always queried separately — they represent different measurement systems and are never combined.
+## Situação do modelo
 
-> **Existing databases from before Alembic:** delete the SQLite file (or drop the PostgreSQL
-> tables), then run `alembic upgrade head` and `python -m src.etl.migrate`.
+A reprodução do artigo está em [docs/REPRODUCTION.md](docs/REPRODUCTION.md). Em resumo: os
+modelos com entrada EDI reproduzem as correlações do artigo (r 0,79–0,88), mas subestimam o
+pico de 2019; os modelos só com dengue não reproduzem. Um baseline ingênuo (repetir o valor
+observado) ainda é competitivo, e toda melhoria futura deve ser comparada com ele.
 
----
+## Licença
 
-## MATLAB → Python mapping
-
-| MATLAB | Python |
-|---|---|
-| `Run1DLSTM_01.m` | `src/ml/train.py` |
-| `ModelsPerform_1DLSTM_01.m` | `src/ml/evaluate.py` |
-| `ComputeRMSE` | `src/ml/utils.compute_rmse()` |
-| `ComputeR` | `src/ml/utils.compute_r()` |
-| `TrainLSTM` + `predictAndUpdateState` | `src/ml/inference.py` |
-
----
-
-## Files that should never be committed
-
-| File / folder | Reason |
-|---|---|
-| `.env` | Contains secrets and credentials |
-| `data/raw/` | Large source files |
-| `data/*.db` | Generated — run `alembic upgrade head` and `python -m src.etl.migrate` to regenerate |
-| `data/models/` | Generated by training — run `train.py` to regenerate |
-| `outputs/` | Generated by evaluate — run `evaluate.py` to regenerate |
-| `.venv/` | Local environment — run `pip install` to regenerate |
-
----
-
-## License
-
-Attribution-NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0)
+Dados e modelo do artigo: Attribution-NonCommercial-ShareAlike 4.0 International
+(CC BY-NC-SA 4.0). Uso comercial não é permitido. Veja [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md).
