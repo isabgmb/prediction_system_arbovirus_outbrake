@@ -123,6 +123,19 @@ python -m src.ml.train              # 30 repetições, como no artigo, ~80 min
 python -m src.ml.evaluate --run data/models/<run_id>    # compara com o artigo e os baselines
 ```
 
+Para decidir se um modelo supera o baseline, use a avaliação com origem móvel. Ela retreina os
+modelos a cada 26 semanas desde 2018-01 e compara cada previsão com a persistência no mesmo
+horizonte, nas temporadas de 2018 e 2019:
+
+```bash
+python -m src.ml.backtest                                    # 10 configurações, 10 repetições
+python -m src.ml.backtest --configs dengue:1,edi:6 --reps 5  # mais rápido
+```
+
+O resultado fica em `data/backtests/<run_id>/` (`report.md`, `metrics.json` e `backtest.png`).
+Com 10 configurações e 10 repetições são 400 treinos, várias horas numa máquina comum. Se for
+interrompido, rode de novo com o mesmo `--run-id`: as origens já concluídas não são refeitas.
+
 - A API procura os modelos ao iniciar: reinicie-a depois de treinar.
 - Para cada configuração, a API usa o treino com mais repetições e, entre esses, o mais
   recente. Um treino `--dev` (3 repetições) só é usado enquanto não houver um completo.

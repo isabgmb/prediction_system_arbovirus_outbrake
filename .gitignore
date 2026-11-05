@@ -43,6 +43,7 @@ ENV/
 # exceptions below only work with this form.
 data/raw/*
 data/models/*
+data/backtests/*
 data/processed/*
 data/*.db
 
