@@ -63,6 +63,15 @@ def build_model_meta(n_back_samples: list[int]) -> tuple[list[str], list[str]]:
     return lag_labels, input_labels
 
 
+def _r_axis_limits(values: np.ndarray, default_low: float) -> tuple[float, float]:
+    """
+    y limits for an axis of correlations: the paper's lower bound when every
+    value is above it, otherwise low enough to show them all, negatives included.
+    """
+    low = min(default_low, float(np.floor((np.min(values) - 0.05) * 10) / 10))
+    return low, 1.0
+
+
 # =============================================================================
 # Figure 1 – bar + scatter performance overview
 # =============================================================================
@@ -113,7 +122,7 @@ def plot_performance(
         [r"$D_{i-j}\rightarrow D_i$", r"$O_{i-j}\rightarrow D_i$"],
         fontsize=11,
     )
-    ax.set_aspect("equal", adjustable="box")
+    ax.set_box_aspect(1)
     ax.box = True
 
     # ── B) r bar chart ───────────────────────────────────────────────────────
@@ -131,8 +140,10 @@ def plot_performance(
         [r"$D_{i-j}\rightarrow D_i$", r"$O_{i-j}\rightarrow D_i$"],
         fontsize=11,
     )
-    ax.set_ylim([0.4, 1.0])
-    ax.set_aspect("equal", adjustable="box")
+    ax.set_ylim(_r_axis_limits(np.concatenate([r_dd - e_r_dd, r_od - e_r_od]), 0.4))
+    if ax.get_ylim()[0] < 0:
+        ax.axhline(0, color="k", lw=0.8)
+    ax.set_box_aspect(1)
 
     ax.legend(
         handles=[
@@ -159,8 +170,10 @@ def plot_performance(
     ax.set_xlabel("RMSE", fontsize=12)
     ax.set_ylabel("r",    fontsize=12)
     ax.set_title("C) Error vs Performance", fontsize=12)
-    ax.set_ylim([0.55, 1.0])
-    ax.set_aspect("equal", adjustable="box")
+    ax.set_ylim(_r_axis_limits(np.concatenate([r_dd, r_od]), 0.55))
+    if ax.get_ylim()[0] < 0:
+        ax.axhline(0, color="gray", lw=0.8, ls="--")
+    ax.set_box_aspect(1)
     ax.legend(
         [plt.Line2D([0], [0], marker="o", color="w",
                     markerfacecolor="gray", markeredgecolor="k", ms=8),
@@ -194,10 +207,15 @@ def plot_best_models(
     """
     Reproduces the 2×2 figure: scatter (top) + time series (bottom)
     for the D→D and O→D best models.
+
+    Unlike the paper, the scatter titles show r without a p-value: the test
+    weeks are strongly autocorrelated, so a p-value that assumes independent
+    weeks overstates the evidence. Axis limits follow the data.
     """
     pred_dd_mean = np.mean(2.0 ** y_pred_dd, axis=1)
     pred_od_mean = np.mean(2.0 ** y_pred_od, axis=1)
     dates        = matlab_datenum_to_datetime(t_test) if dates is None else dates
+    lim          = 1.05 * max(y_test.max(), pred_dd_mean.max(), pred_od_mean.max())
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 9))
     fig.patch.set_facecolor("white")
@@ -210,11 +228,10 @@ def plot_best_models(
         xs = np.array([y_true.min(), y_true.max()])
         ax.plot(xs, m * xs + b, color="gray", lw=1)
         r = np.corrcoef(y_true, y_pred_mean)[0, 1]
-        p_val = _corr_pvalue(r, len(y_true))
-        ax.set_title(f"r = {r:.2f}, p = {p_val:.2e}", fontsize=10)
+        ax.set_title(f"r = {r:.2f}", fontsize=10)
         ax.set_xlabel("Known",     fontsize=10)
         ax.set_ylabel("Predicted", fontsize=10)
-        ax.set_xlim(0, 35); ax.set_ylim(0, 35)
+        ax.set_xlim(0, lim); ax.set_ylim(0, lim)
         ax.set_aspect("equal")
 
     def ts_panel(ax, dates, pred_mean, y_true, color, title):
@@ -222,7 +239,7 @@ def plot_best_models(
         ax.plot(dates, y_true,   color="black",  lw=1.0, label="Known")
         ax.set_title(title, fontsize=11)
         ax.set_ylabel("Mean Dengue Occ", fontsize=10)
-        ax.set_ylim(0, 35)
+        ax.set_ylim(0, lim)
         ax.xaxis.set_major_formatter(mdates.DateFormatter("%b-%y"))
         ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
         plt.setp(ax.xaxis.get_majorticklabels(), rotation=30, ha="right")
@@ -240,17 +257,6 @@ def plot_best_models(
         fig.savefig(str(save_path), dpi=300, bbox_inches="tight")
         print(f"Saved → {save_path}")
     plt.show()
-
-
-# =============================================================================
-# Tiny statistics helper
-# =============================================================================
-
-def _corr_pvalue(r: float, n: int) -> float:
-    """Two-tailed p-value for a Pearson r."""
-    from scipy import stats
-    t_stat = r * np.sqrt((n - 2) / (1 - r ** 2 + 1e-12))
-    return 2 * stats.t.sf(np.abs(t_stat), df=n - 2)
 
 
 # =============================================================================
