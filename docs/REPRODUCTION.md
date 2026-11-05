@@ -73,3 +73,43 @@ likelihood:
 
 Re-running `Run1DLSTM_01.m` in MATLAB with the training-period fit printed (and one fixed seed)
 would settle most of these. Until then, the EDI models are the reproduced part of the paper.
+
+Diagnostics run since (not committed as code) narrow this down. The port's forward pass equals a
+step-by-step NumPy LSTM written from MATLAB's equations (max difference 1.6e-6), so prediction is
+not the cause. Test performance peaks early and then degrades: for dengue lag 1, test r is about
+0.93 at epochs 50–100 in all 7 repetitions checked and falls to about 0.62 at epoch 250, after the
+learning-rate drop, while the training fit keeps improving. The paper's r of 0.899 lies on that
+curve, around epoch 120–130. The gap is therefore how far each implementation overfits by epoch
+250, not a porting bug; per-epoch curves from MATLAB would show whether its training overfits
+more slowly.
+
+## Rolling-origin evaluation
+
+The paper's test is one season (2019-11 to 2019-52): 42 autocorrelated weeks. It also lets the
+first `h - 1` test weeks of a configuration with horizon `h` use a model trained on data observed
+after the forecast would have been issued. `python -m src.ml.backtest` evaluates instead with
+rolling origins: models are retrained every 26 weeks from 2018-01, each forecast only uses a model
+trained on data available when it is issued, and each configuration is compared with persistence
+at the same horizon over the 2018 and 2019 seasons. It reports a skill score
+(1 − MSE / MSE of persistence) with a 95% moving-block bootstrap interval, and the error in the
+size and timing of each season's peak. The figures no longer show p-values, which assumed
+independent weeks.
+
+Preliminary run (`bt-demo`: 3 configurations, 5 repetitions per refit, 4 refits):
+
+| Configuration | h | Season | MAE | Persistence MAE | Skill (95% CI) | Peak size | Peak timing |
+|---|---|---|---|---|---|---|---|
+| dengue lag 1 | 1 | 2018 | 4.41 | 1.51 | −10.7 (−17.9 to −2.4) | −48% | +11 wk |
+| dengue lag 1 | 1 | 2019 | 3.05 | 1.70 | −1.7 (−5.9 to −0.0) | −15% | +2 wk |
+| EDI lag 1 | 1 | 2018 | 4.52 | 1.51 | −10.9 (−19.2 to −1.8) | −47% | +11 wk |
+| EDI lag 1 | 1 | 2019 | 2.44 | 1.70 | −0.9 (−2.9 to +0.1) | −3% | −1 wk |
+| EDI lag 6 | 4 | 2018 | 5.70 | 3.17 | −2.8 (−5.4 to −0.6) | −57% | +14 wk |
+| EDI lag 6 | 4 | 2019 | 2.69 | 3.62 | +0.4 (−0.2 to +0.8) | −41% | +0 wk |
+
+No configuration beats persistence with confidence. In 2018 the models trained on 2016–2017 miss
+the epidemic: the dengue lag 1 model receives last week's 22 cases and predicts 4, although it was
+trained on weeks of up to 41 cases in 2016, which matches the trajectory memorization seen in the
+diagnostics. EDI lag 6, the API's default, is the only one with positive skill in a season (2019),
+but the interval includes zero and it predicts the peak at 59% of its size. A full run (all 10
+configurations, 10 or more repetitions) should confirm these numbers before the API's default
+model is chosen.
