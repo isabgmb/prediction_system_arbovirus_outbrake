@@ -39,6 +39,13 @@ def main() -> None:
               + f"; {report.forecasts_cleared} stored forecasts cleared")
         if report.unknown_neighborhoods:
             print(f"Unknown neighborhoods (skipped): {sorted(report.unknown_neighborhoods)}")
+        h = report.health
+        if h:
+            from src.ml.data import week_label
+            edi = f"; EDI up to {week_label(h.last_edi_week)}" if h.last_edi_week else "; no EDI"
+            print(f"Stored data: {week_label(h.first_week)} to {week_label(h.last_week)}{edi}")
+            for w in h.warnings():
+                print(f"WARNING: {w}")
     asyncio.run(run())
 
 

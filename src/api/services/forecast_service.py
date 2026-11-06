@@ -57,6 +57,33 @@ def _utc(value: datetime | None) -> datetime:
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
 
+def history_problems(weeks: list[tuple[int, int]], x: np.ndarray, reporting: list[int],
+                     n_total: int, input_type: str) -> list[str]:
+    """
+    For each week, what in the weeks BEFORE it keeps the model from reading
+    the history ('' when nothing). The LSTM reads every week from the start of
+    the series, so a forecast from a week needs all earlier weeks:
+    - every model: a value of its input series in every week;
+    - dengue models: every neighborhood reporting cases, since a mean over a
+      few neighborhoods is a different quantity (the paper's data has all of
+      them every week). EDI weeks with some neighborhoods missing are averaged
+      over the others, as the paper does.
+    """
+    no_value, partial, out = [], [], []
+    for i, w in enumerate(weeks):
+        parts = []
+        if no_value:
+            parts.append(f"no {input_type.upper()} value in {ml_data.describe_weeks(no_value)}")
+        if partial:
+            parts.append(f"only some neighborhoods reported cases in {ml_data.describe_weeks(partial)}")
+        out.append("; ".join(parts))
+        if np.isnan(x[i]):
+            no_value.append(w)
+        elif input_type == "dengue" and reporting[i] < n_total:
+            partial.append(w)
+    return out
+
+
 def relative_risk(history: np.ndarray, peak: float) -> tuple[str, RiskThresholdsOut]:
     lo_p, hi_p = settings.risk_percentiles
     history = np.asarray(history, dtype=float)
@@ -156,11 +183,14 @@ class ForecastService:
                        DengueCase.case_count.isnot(None)))
         return (await self.db.execute(stmt)).scalar_one()
 
-    async def _complete_weeks(self, series: ml_data.CitySeries, input_type: str) -> tuple[list[bool], list[str]]:
+    async def _complete_weeks(self, series: ml_data.CitySeries,
+                              input_type: str) -> tuple[list[bool], list[str], list[str]]:
         """
         Which weeks can serve as an as-of week: every neighborhood reported
         cases and the model's input series has a value. Newly ingested weeks
         are often partial; a city mean over a few neighborhoods would mislead.
+        Also returns, per week, what in the earlier weeks keeps the model from
+        reading the history (see history_problems).
         """
         city = await self.areas.area("city")
         reporting = {(r.epi_year, r.epi_week): r.reporting for r in await self.areas.weekly_cases(city)}
@@ -175,12 +205,13 @@ class ForecastService:
                 problems.append(f"no {input_type.upper()} value")
             complete.append(not problems)
             why.append("; ".join(problems))
-        return complete, why
+        counts = [reporting.get(w, 0) for w in series.weeks]
+        return complete, why, history_problems(series.weeks, x, counts, n_total, input_type)
 
     async def _city_rows(self, run: RunInfo, as_of: tuple[int, int] | None):
         """City forecast at the as-of week (default: latest complete week), computed and stored if needed."""
         series = await ml_data.load_from_db(self.db)
-        complete, why = await self._complete_weeks(series, run.input_type)
+        complete, why, history = await self._complete_weeks(series, run.input_type)
         if as_of is None:
             if not any(complete):
                 raise HTTPException(status_code=422, detail="No complete week to forecast from.")
@@ -193,6 +224,11 @@ class ForecastService:
                     "pick an earlier week or omit as_of to use the latest complete one."))
         else:
             raise HTTPException(status_code=422, detail=f"No data for epidemiological week {as_of[0]}-{as_of[1]:02d}.")
+        if history[as_of_index]:
+            raise HTTPException(status_code=422, detail=(
+                f"Cannot forecast from {ml_data.week_label(series.weeks[as_of_index])}: {history[as_of_index]}. "
+                "The model reads every week from the start of the series; load the missing data "
+                "(python -m src.ingestion) to forecast from this week or later ones."))
         as_of_row = await self.weeks.get(*series.weeks[as_of_index])
         n_neigh = await self._neighborhoods_reporting(as_of_row.id)
 

@@ -54,16 +54,30 @@ def n_train_samples(n_samples: int, train_split: float = 0.8) -> int:
     return int(np.floor(train_split * n_samples + 0.5))
 
 
-def log2_transform(values: np.ndarray, name: str = "series") -> np.ndarray:
+def _weeks_text(weeks, idx: np.ndarray, limit: int = 6) -> str:
+    labels = [f"{weeks[i][0]}-{weeks[i][1]:02d}" for i in idx]
+    more = f" and {len(labels) - limit} more" if len(labels) > limit else ""
+    return ", ".join(labels[:limit]) + more
+
+
+def log2_transform(values: np.ndarray, name: str = "series",
+                   weeks: list[tuple[int, int]] | None = None) -> np.ndarray:
     """
     log2 as in the paper. Zero or negative values have no log; the city-wide
     means used by the paper are always positive (minimum 0.67 cases).
+    With `weeks` (one per value), errors name the offending weeks.
     """
     values = np.asarray(values, dtype=float)
-    if np.isnan(values).any():
-        raise MissingDataError(f"{name} has missing weeks; fill the data before modelling")
-    if (values <= 0).any():
-        raise MissingDataError(f"{name} has values <= 0, which log2 cannot transform")
+    missing = np.flatnonzero(np.isnan(values))
+    if missing.size:
+        where = f" ({_weeks_text(weeks, missing)})" if weeks is not None else ""
+        raise MissingDataError(
+            f"{name} has no value for {missing.size} week(s){where}; the model reads every week from "
+            "the start of the series, so these weeks must be filled before modelling")
+    bad = np.flatnonzero(values <= 0)
+    if bad.size:
+        where = f" ({_weeks_text(weeks, bad)})" if weeks is not None else ""
+        raise MissingDataError(f"{name} has values <= 0{where}, which log2 cannot transform")
     return np.log2(values)
 
 

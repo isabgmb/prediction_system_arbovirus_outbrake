@@ -12,7 +12,8 @@ Available sources:
 A live feed (e.g. SINAN extracts, the municipal ovitrap program) is added
 by implementing WeeklySource.fetch(); see docs/INGESTION.md.
 """
-from src.ingestion.base import IngestReport, WeeklyCases, WeeklyOvitrap, WeeklySource, ingest
+from src.ingestion.base import DataHealth, IngestReport, WeeklyCases, WeeklyOvitrap, WeeklySource, data_health, ingest
 from src.ingestion.csv_source import CsvCasesSource
 
-__all__ = ["CsvCasesSource", "IngestReport", "WeeklyCases", "WeeklyOvitrap", "WeeklySource", "ingest"]
+__all__ = ["CsvCasesSource", "DataHealth", "IngestReport", "WeeklyCases", "WeeklyOvitrap", "WeeklySource",
+           "data_health", "ingest"]

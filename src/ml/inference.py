@@ -139,7 +139,7 @@ def forecast(series: CitySeries, as_of_index: int, run: RunInfo, horizon: int,
         raise MissingDataError(f"at least {first_target + 1} observed weeks are needed before forecasting")
 
     observed = series.series(run.input_type)[: as_of_index + 1]       # nothing after the as-of week
-    x = log2_transform(observed, run.input_type)
+    x = log2_transform(observed, run.input_type, series.weeks[: as_of_index + 1])
     targets = np.arange(first_target, as_of_index + horizon + 1)
     inputs = build_inputs(x, targets, run.lag)                         # every input is <= as_of_index
 
