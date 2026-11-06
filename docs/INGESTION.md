@@ -11,7 +11,7 @@ A spreadsheet export with one row per neighborhood and week:
 |---|---|
 | `neighborhood` | official municipal code (e.g. `007`) or name (accents and spelling variants are matched) |
 | `epi_year`, `epi_week` | epidemiological year and week (Sunday–Saturday, as in SINAN) |
-| `cases` | notified cases; blank if unknown |
+| `cases` | notified cases; `0` when there were none, blank if unknown |
 | `disease` | optional, default `dengue` |
 
 ```bash
@@ -28,6 +28,23 @@ What happens:
 A week only becomes the default forecast week once it is **complete**: all neighborhoods
 reported cases and the model's input exists (ovitrap EDI for EDI models). Until then forecasts
 use the latest complete week, and asking for the partial week returns `422` with what is missing.
+
+The model reads every week from the start of the series, so the **earlier weeks** matter too.
+A forecast returns `422` naming the weeks when, before its as-of week, there is:
+- a week with no record at all, or with no EDI for EDI models;
+- for dengue models, a week where only some neighborhoods reported cases (EDI weeks with some
+  neighborhoods missing are averaged over the others, as in the paper).
+
+After every load the CLI checks the whole stored series and prints a `WARNING` for each of
+these, with the weeks, e.g.:
+
+```
+Stored data: 2016-01 to 2020-12; EDI up to 2020-08
+WARNING: No case records in 2020-03. No forecast can be made from these weeks or later ones until they are loaded.
+```
+
+The load is not refused, since a later file may be the one that fills the gap. A neighborhood
+with no cases in a week should be sent as `0`: a missing row makes the week partial.
 
 ## A live source
 
