@@ -123,6 +123,12 @@ but the interval includes zero and it predicts the peak at 59% of its size. A fu
 configurations, 10 or more repetitions) should confirm these numbers before the API's default
 model is chosen.
 
+A finished backtest can also be evaluated as a combination with persistence, from the predictions
+it saved in `data/backtests/<run_id>/predictions/`, without retraining:
+`python -m src.ml.backtest_combine --run-id <run_id>`. It writes `combination_w050.md` and
+`.json` beside the backtest's report, with the skill and peak error of the LSTM alone and combined,
+and whether each meets the criterion below.
+
 ## Criteria fixed before the full backtest
 
 Written before the full backtest of the paper's version (`paper-full`) was run, so that its
