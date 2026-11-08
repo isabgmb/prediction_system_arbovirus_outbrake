@@ -3,6 +3,15 @@
 How the Python port compares with the paper's MATLAB results (`Run1DLSTM_01.m`,
 `ModelsPerform_1DLSTM_01.m`), what was changed to get there, and what is still open.
 
+**Code version.** The results in this document are reproduced by the code at the git tag
+`paper-reproduction-v1`: the faithful port of the paper's training, before any change meant to
+improve it. Later changes to training are evaluated against these results and documented in their
+own sections, each naming its commit; a change that does not pass is reverted, and its result is
+kept here. To rerun with the code and the package versions of these runs:
+`git checkout paper-reproduction-v1`, then `pip install -r requirements-lock.txt` in a new
+virtual environment. The lock file was generated on Windows; on another system use
+`requirements.txt` and expect differences in the last decimals.
+
 ## Result (run `lstm-paper-30r`)
 
 10 configurations × 30 repetitions, seed 1, data from the raw files; 166 weeks for training
