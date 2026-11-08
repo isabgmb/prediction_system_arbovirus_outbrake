@@ -122,3 +122,43 @@ diagnostics. EDI lag 6, the API's default, is the only one with positive skill i
 but the interval includes zero and it predicts the peak at 59% of its size. A full run (all 10
 configurations, 10 or more repetitions) should confirm these numbers before the API's default
 model is chosen.
+
+## Criteria fixed before the full backtest
+
+Written before the full backtest of the paper's version (`paper-full`) was run, so that its
+results cannot shape them. "Season" is an epidemiological year (2018 and 2019) as reported by
+`python -m src.ml.backtest` with its default settings: origins every 26 weeks from 2018-01, at
+least 10 repetitions per refit, each configuration at its own horizon `h`. Skill is always against
+persistence at the same horizon.
+
+**For a model to set the API's risk level.** A configuration, or its combination with persistence
+(below), qualifies only if, in **both** seasons:
+
+1. the lower bound of the 95% interval of its skill is above zero; and
+2. its peak size is within ±25% (the highest forecast week is between 75% and 125% of the highest
+   observed week).
+
+The risk level compares the forecast peak with historical percentiles, so a model that beats
+persistence on average but forecasts 60% of the peak still gives the wrong level when it matters
+most; hence the second condition. Both seasons are required because they test different
+situations (2018: models trained on 2016–2017; 2019: models that have seen 2018), and a model that
+passes in one only may have been lucky. Until a configuration qualifies, the risk level comes from
+the observed data, and LSTM forecasts are shown as experimental.
+`python -m src.ml.backtest_combine` checks this criterion for every configuration of a backtest.
+
+**For a change to training to stay in the code.** The change is evaluated with the same backtest
+settings and compared with `paper-full`. It stays only if, for EDI lag 6 (the API's default) in
+both seasons, its skill is above zero and above the reference's; otherwise the commit is reverted
+and the result is recorded here. The results of every configuration evaluated are reported,
+including those that got worse. This rule uses point estimates and is looser than the one above
+on purpose: keeping a change only decides where the next experiment starts, while setting the risk
+level affects what users see.
+
+**Combination with persistence.** The combination evaluated from the saved predictions, without
+retraining, is the plain average of the LSTM ensemble mean and persistence (weight 0.5). The
+weight is fixed here and is not tuned on 2018–2019; any other weight would have to be chosen on
+earlier seasons. The combination is held to the same criterion as the LSTM alone.
+
+**Many comparisons.** Ten configurations, alone and combined, are 20 checks against the
+criterion, so one passing by chance is possible even at 95%. A configuration that passes in one
+backtest is adopted, but is evaluated again on later seasons (2020 onward) as they are ingested.
