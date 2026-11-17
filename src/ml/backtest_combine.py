@@ -167,6 +167,8 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--weight", type=float, default=0.5,
                     help="weight of the LSTM; the rest goes to persistence (default 0.5, fixed in advance)")
     args = ap.parse_args(argv)
+    if not 0.0 <= args.weight <= 1.0:
+        ap.error(f"--weight must be between 0 and 1, got {args.weight}")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s", datefmt="%H:%M:%S")
 
     run_dir = bt.OUT_DIR / args.run_id
